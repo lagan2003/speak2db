@@ -1,21 +1,20 @@
 from dotenv import load_dotenv
-load_dotenv()  # Load environment variables from .env file
-# print("DEBUG API KEY:", os.getenv("GOOGLE_API_KEY"))
+load_dotenv()
 
 import os
 import streamlit as st
 import sqlite3
 import pandas as pd
 import plotly.express as px
-import google.generativeai as genai
-import speech_recognition as sr  # For speech-to-text conversion
-# import pyttsx3  # For text-to-speech conversion
+import openai  # still using OpenAI's library for Groq compatibility
+import speech_recognition as sr
+from gtts import gTTS
+from io import BytesIO
 
-# Configure the API key
-try:
-    genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-except Exception as e:
-    st.error(f"Error configuring Google Gemini API: {e}")
+# ✅ Configure Groq API for OpenAI-compatible client
+openai.api_base = "https://api.groq.com/openai/v1"
+openai.api_key = os.getenv("GROQ_API_KEY")  # must be gsk-...
+
 
 def fetch_database_schema():
     try:
@@ -124,15 +123,14 @@ def generate_prompt():
     """
     return prompt
 
-def get_gemini_response(question, prompt, history):
+def get_groq_response(question, prompt, history):
     try:
         if not prompt:
             st.error("Prompt is empty. Cannot generate response.")
             return None
 
-        # Build the history context
         history_context = ""
-        for i, entry in enumerate(history[-3:], 1):  # Include up to the last 3 interactions
+        for i, entry in enumerate(history[-3:], 1):
             history_context += f"""
             Previous Question {i}:
             {entry['input']}
@@ -141,10 +139,9 @@ def get_gemini_response(question, prompt, history):
             {entry['sql_query']}
 
             Result {i}:
-            {pd.DataFrame(entry['result']).head(5).to_string(index=False)}  # Show only the first 5 rows
+            {pd.DataFrame(entry['result']).head(5).to_string(index=False)}
             """
 
-        # Combine the history context with the current question
         full_prompt = f"""
         {prompt}
 
@@ -155,12 +152,17 @@ def get_gemini_response(question, prompt, history):
         {question}
         """
 
-        # Send the full prompt to Gemini
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content([full_prompt])
-        return response.text
+        response = openai.ChatCompletion.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert SQL assistant."},
+                {"role": "user", "content": full_prompt}
+            ],
+            temperature=0.3
+        )
+        return response['choices'][0]['message']['content']
     except Exception as e:
-        st.error(f"Error generating response from Gemini: {e}")
+        st.error(f"Error generating response from Groq: {e}")
         return None
 
 # Function to convert speech to text
@@ -242,13 +244,9 @@ def text_to_speech(text):
     except Exception as e:
         st.error(f"Error in text-to-speech: {e}")
 
-
-
-# Function to generate a summary of the SQL query output using Gemini
-def get_gemini_summary(dataframe, user_question):
+def get_groq_summary(dataframe, user_question):
     try:
-        # Convert the DataFrame to a string representation for the prompt
-        data_preview = dataframe.head(10).to_string(index=False)  # Show only the first 10 rows
+        data_preview = dataframe.head(10).to_string(index=False)
         prompt = f"""
         You are an expert data summarizer. Summarize the following data in a concise and meaningful way.
 
@@ -260,12 +258,20 @@ def get_gemini_summary(dataframe, user_question):
 
         Provide a summary that highlights key insights, trends, or patterns in the data.
         """
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content([prompt])
-        return response.text
+
+        response = openai.ChatCompletion.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert summarizer."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3
+        )
+        return response['choices'][0]['message']['content']
     except Exception as e:
-        st.error(f"Error generating summary from Gemini: {e}")
+        st.error(f"Error generating summary from Groq: {e}")
         return None
+
 
 def main():
     st.set_page_config(page_title="Gemini SQL Query Generator", layout="wide")
@@ -403,7 +409,7 @@ def main():
                     return
 
                 # Pass the history to the Gemini response function
-                response = get_gemini_response(user_question, prompt, st.session_state.history)
+                response = get_groq_response(user_question, prompt, st.session_state.history)
                 if not response:
                     st.error("Failed to generate response from Gemini.")
                     return
@@ -496,7 +502,7 @@ def main():
     if not df.empty:  # Ensure the DataFrame is not empty
         st.subheader("📄 Summary of the Output")
         with st.spinner("Generating summary using Gemini..."):
-            summary = get_gemini_summary(df, user_question)  # Generate the summary
+            summary = get_groq_summary(df, user_question)  # Generate the summary
             if summary:
                 st.write(summary)  # Display the summary
                 # Automatically play the summary as audio
