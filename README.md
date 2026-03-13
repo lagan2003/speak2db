@@ -35,8 +35,8 @@
 ## 🔧 Setup
 
 ```bash
-git clone https://github.com/KrishnaChauhan7/Speak2DB.git
-cd Speak2DB
+git clone https://github.com/lagan2003/speak2db.git
+cd speak2db
 
 # Add your Gemini API key
 echo GOOGLE_API_KEY="your-key" > .env
